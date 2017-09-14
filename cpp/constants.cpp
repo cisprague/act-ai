@@ -1,4 +1,4 @@
-#include <boost/python>
+#include <boost/python.hpp>
 #include "../hpp/constants.hpp"
 
 boost::python::scope().attr("R_EARTH") = R_EARTH;

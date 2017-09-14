@@ -1,0 +1,1 @@
+/usr/bin/c++ -fPIC   -shared -Wl,-soname,libactai.so -o libactai.so CMakeFiles/actai.dir/spacecraft.cpp.o -lboost_python 

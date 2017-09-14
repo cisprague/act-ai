@@ -1,10 +1,5 @@
 #ifndef spacecraft_hpp
 #define spacecraft_hpp
-#include <vector>
-#include <string>
-#include <iostream>
-#include <cmath>
-#include "constants.hpp"
 
 struct Spacecraft {
 
@@ -17,6 +12,4 @@ struct Spacecraft {
 	// destructor
 	~Spacecraft (void) {};
 
-
-
-}
+};
