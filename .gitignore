@@ -1,4 +1,2 @@
-.vs
-ipython/.ipynb_checkpoints
-bsp
-tpc
+ipynb/.ipynb_checkpoints
+py/__pycache__
