@@ -82,9 +82,9 @@ class dynamics(object):
         x1 = y**2
         x2 = z**2
         x3 = x0 + x1 + x2
-        x4 = self.mu / x3**(3 / 2.)
+        x4 = self.mu / x3**(3 / 2)
         x5 = -x4
-        x6 = x3**(-5 / 2.)
+        x6 = x3**(-5 / 2)
         x7 = 3 * self.mu * x6
         x8 = x0 * x7
         x9 = self.mu * x * x6

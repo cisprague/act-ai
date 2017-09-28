@@ -1,11 +1,11 @@
+from spacecraft import spacecraft
+from indirect.leg import leg
+
+import PyKEP as pk
 import numpy as np
 import matplotlib as mpl
-from mpl_toolkits.mplot3d import Axes3D
 import matplotlib.pyplot as plt
-import PyKEP as pk
-from spacecraft import spacecraft
-from leg import leg
-
+from mpl_toolkits.mplot3d import Axes3D
 
 class orbit2orbit(object):
 
@@ -111,6 +111,89 @@ class orbit2orbit(object):
         # plot planets
         pk.orbit_plots.plot_planet(kep0, t0, units=pk.AU, color=(0.8,0.8,1), ax=axis)
         pk.orbit_plots.plot_planet(kepf, tf, units=pk.AU, color=(0.8,0.8,1), ax=axis)
+
+        # plot trajectory
+        traj = self.leg.trajectory
+        axis.plot(traj[:,0], traj[:,1], traj[:,2], "k.-")
+
+        # show plot
+        plt.show()
+
+
+class planet2planet(object):
+
+    # z = [t0, T, costates], [sec, sec, nondim]
+
+    def __init__(self, p0="earth", pf="mars", mass=1000, tmax=0.05, isp=1000, atol=1e-5, rtol=1e-5):
+
+        # planets
+        self.p0 = pk.planet.jpl_lp(p0)
+        self.pf = pk.planet.jpl_lp(pf)
+
+        # spacecraft
+        self.sc = spacecraft(mass=mass, tmax=tmax, isp=isp)
+
+        # indirect leg
+        self.leg = leg(self.sc)
+
+        # integration parametres
+        self.atol = atol
+        self.rtol = rtol
+
+    def fitness(self, z):
+
+        # times
+        t0 = z[0]
+        tf = t0 + z[1]
+
+        # initial costates
+        l0 = np.asarray(z[2:])
+
+        # cartesian states
+        r0, v0 = np.asarray(self.p0.eph(t0))
+        rf, vf = np.asarray(self.pf.eph(tf))
+
+        # set leg
+        self.leg.set(t0*24*60*60, r0, v0, l0, tf*24*60*60, rf, vf)
+
+        # propagate leg
+        ceq = self.leg.mismatch_constraints(atol=self.atol, rtol=self.rtol)
+
+        # get final state
+        mf = self.leg.trajectory[-1, 6]
+
+        return np.hstack(([-mf], ceq))
+
+    def get_bounds(self):
+        lb = [1000, 200, *[-1e2]*7]
+        ub = [4000, 5000, *[1e2]*7]
+        return (lb, ub)
+
+    def get_nobj(self):
+        return 1
+
+    def get_nec(self):
+        return 7
+
+    def plot_traj(self, z):
+
+        # set up figure
+        fig = plt.figure()
+        axis = fig.gca(projection='3d')
+
+        # sun
+        axis.scatter([0], [0], [0], color='y')
+
+        # set parametres
+        self.fitness(z)
+
+        # times
+        t0 = z[0]
+        tf = z[0] + z[1]
+
+        # plot planets
+        pk.orbit_plots.plot_planet(self.p0, t0=pk.epoch(t0), units=pk.AU, ax=axis, color=(0.8, 0.8, 1))
+        pk.orbit_plots.plot_planet(self.pf, t0=pk.epoch(tf), units=pk.AU, ax=axis, color=(0.8, 0.8, 1))
 
         # plot trajectory
         traj = self.leg.trajectory
