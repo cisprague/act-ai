@@ -37,36 +37,36 @@ class dynamics(object):
         u, ix, iy, iz = self.pontryagin(fullstate)
 
         # common subexpression elimination
-        x0 = self.c1*u/m
+        x0 = self.c1 * u / m
         x1 = x**2
         x2 = y**2
         x3 = z**2
         x4 = x1 + x2 + x3
-        x5 = self.mu/x4**(3/2)
-        x6 = x4**(-5/2)
-        x7 = 3*lvy*self.mu*x6*y
-        x8 = 3*lvz*self.mu*x6*z
+        x5 = self.mu / x4**(3 / 2)
+        x6 = x4**(-5 / 2)
+        x7 = 3 * lvy * self.mu * x6 * y
+        x8 = 3 * lvz * self.mu * x6 * z
         x9 = -x5
-        x10 = 3*self.mu*x6
-        x11 = 3*lvx*self.mu*x*x6
-        x12 = self.c1*u/m**2
+        x10 = 3 * self.mu * x6
+        x11 = 3 * lvx * self.mu * x * x6
+        x12 = self.c1 * u / m**2
 
         # fullstate transition
         dfs = np.array([
-                                              vx,
-                                              vy,
-                                              vz,
-                                    ix*x0 - x*x5,
-                                    iy*x0 - x5*y,
-                                    iz*x0 - x5*z,
-                                      -self.c2*u,
-                -lvx*(x1*x10 + x9) - x*x7 - x*x8,
-               -lvy*(x10*x2 + x9) - x11*y - x8*y,
-               -lvz*(x10*x3 + x9) - x11*z - x7*z,
-                                             -lx,
-                                             -ly,
-                                             -lz,
-            ix*lvx*x12 + iy*lvy*x12 + iz*lvz*x12
+            vx,
+            vy,
+            vz,
+            ix * x0 - x * x5,
+            iy * x0 - x5 * y,
+            iz * x0 - x5 * z,
+            -self.c2 * u,
+            -lvx * (x1 * x10 + x9) - x * x7 - x * x8,
+            -lvy * (x10 * x2 + x9) - x11 * y - x8 * y,
+            -lvz * (x10 * x3 + x9) - x11 * z - x7 * z,
+            -lx,
+            -ly,
+            -lz,
+            ix * lvx * x12 + iy * lvy * x12 + iz * lvz * x12
         ])
 
         return dfs

@@ -1,3 +1,6 @@
 ipynb/.ipynb_checkpoints
 py/__pycache__
 py/indirect/__pycache__
+py/direct/__pycache__
+ipynb/direct/.ipynb_checkpoints
+ipynb/indirect/.ipynb_checkpoints

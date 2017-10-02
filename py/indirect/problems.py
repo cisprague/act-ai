@@ -7,11 +7,12 @@ import matplotlib as mpl
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 
+
 class orbit2orbit(object):
 
     def __init__(
         self,
-        elem0 = [
+        elem0=[
             149598261129.93335,
             0.016711230601231957,
             2.640492490927786e-07,
@@ -19,7 +20,7 @@ class orbit2orbit(object):
             4.938194050401601,
             0
         ],
-        elemf = [
+        elemf=[
             227943822376.03537,
             0.09339409892101332,
             0.032283207367640024,
@@ -78,8 +79,8 @@ class orbit2orbit(object):
 
     def get_bounds(self):
         pi = 3.14159265359
-        lb = [1.728e7, 0.0, 0.0, *[-1e5]*7]
-        ub = [2.592e8, 2*pi, 2*pi, *[1e5]*7]
+        lb = [1.728e7, 0.0, 0.0, *[-1e5] * 7]
+        ub = [2.592e8, 2 * pi, 2 * pi, *[1e5] * 7]
         return (lb, ub)
 
     def get_nobj(self):
@@ -102,19 +103,21 @@ class orbit2orbit(object):
 
         # initial and final times in days
         t0 = pk.epoch(0)
-        tf = pk.epoch(z[0]/60/60/24)
+        tf = pk.epoch(z[0] / 60 / 60 / 24)
 
         # create Keplerian planets
         kep0 = pk.planet.keplerian(t0, self.elem0)
         kepf = pk.planet.keplerian(tf, self.elemf)
 
         # plot planets
-        pk.orbit_plots.plot_planet(kep0, t0, units=pk.AU, color=(0.8,0.8,1), ax=axis)
-        pk.orbit_plots.plot_planet(kepf, tf, units=pk.AU, color=(0.8,0.8,1), ax=axis)
+        pk.orbit_plots.plot_planet(
+            kep0, t0, units=pk.AU, color=(0.8, 0.8, 1), ax=axis)
+        pk.orbit_plots.plot_planet(
+            kepf, tf, units=pk.AU, color=(0.8, 0.8, 1), ax=axis)
 
         # plot trajectory
         traj = self.leg.trajectory
-        axis.plot(traj[:,0], traj[:,1], traj[:,2], "k.-")
+        axis.plot(traj[:, 0], traj[:, 1], traj[:, 2], "k.-")
 
         # show plot
         plt.show()
@@ -124,7 +127,10 @@ class planet2planet(object):
 
     # z = [t0, T, costates], [sec, sec, nondim]
 
-    def __init__(self, p0="earth", pf="mars", mass=1000, tmax=0.05, isp=1000, atol=1e-5, rtol=1e-5):
+    def __init__(
+        self, p0="earth", pf="mars", mass=1000, tmax=0.3, isp=2500, atol=1e-5, rtol=1e-5, adapt=True, npts=1000,
+        t0lb = 1000, t0ub=2000, Tlb=100, Tub=500
+    ):
 
         # planets
         self.p0 = pk.planet.jpl_lp(p0)
@@ -139,6 +145,14 @@ class planet2planet(object):
         # integration parametres
         self.atol = atol
         self.rtol = rtol
+        self.adapt = True
+        self.npts = npts
+
+        # bounds
+        self.t0lb = t0lb
+        self.t0ub = t0ub
+        self.Tlb = Tlb
+        self.Tub = Tub
 
     def fitness(self, z):
 
@@ -154,10 +168,11 @@ class planet2planet(object):
         rf, vf = np.asarray(self.pf.eph(tf))
 
         # set leg
-        self.leg.set(t0*24*60*60, r0, v0, l0, tf*24*60*60, rf, vf)
+        self.leg.set(t0 * 24 * 60 * 60, r0, v0, l0, tf * 24 * 60 * 60, rf, vf)
 
         # propagate leg
-        ceq = self.leg.mismatch_constraints(atol=self.atol, rtol=self.rtol)
+        ceq = self.leg.mismatch_constraints(
+            atol=self.atol, rtol=self.rtol, adapt=self.adapt, npts=self.npts)
 
         # get final state
         mf = self.leg.trajectory[-1, 6]
@@ -165,15 +180,15 @@ class planet2planet(object):
         return np.hstack(([-mf], ceq))
 
     def get_bounds(self):
-        lb = [1000, 200, *[-1e2]*7]
-        ub = [4000, 5000, *[1e2]*7]
+        lb = [self.t0lb, self.Tlb, *[-1e2] * 7]
+        ub = [self.t0ub, self.Tub, *[1e2] * 7]
         return (lb, ub)
 
     def get_nobj(self):
         return 1
 
     def get_nec(self):
-        return 7
+        return 8
 
     def plot_traj(self, z):
 
@@ -192,12 +207,14 @@ class planet2planet(object):
         tf = z[0] + z[1]
 
         # plot planets
-        pk.orbit_plots.plot_planet(self.p0, t0=pk.epoch(t0), units=pk.AU, ax=axis, color=(0.8, 0.8, 1))
-        pk.orbit_plots.plot_planet(self.pf, t0=pk.epoch(tf), units=pk.AU, ax=axis, color=(0.8, 0.8, 1))
+        pk.orbit_plots.plot_planet(self.p0, t0=pk.epoch(
+            t0), units=pk.AU, ax=axis, color=(0.8, 0.8, 1))
+        pk.orbit_plots.plot_planet(self.pf, t0=pk.epoch(
+            tf), units=pk.AU, ax=axis, color=(0.8, 0.8, 1))
 
         # plot trajectory
         traj = self.leg.trajectory
-        axis.plot(traj[:,0], traj[:,1], traj[:,2], "k.-")
+        axis.plot(traj[:, 0], traj[:, 1], traj[:, 2], "k.-")
 
         # show plot
         plt.show()

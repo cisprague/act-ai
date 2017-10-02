@@ -1,5 +1,5 @@
 import numpy as np
-from scipy.integrate import ode
+from scipy.integrate import ode, odeint
 from constants import MU_SUN
 from indirect.dynamics import dynamics
 
@@ -46,17 +46,7 @@ class leg(object):
         self.rf = rf
         self.vf = vf
 
-    def propagate(self, atol=1e-5, rtol=1e-5):
-
-        # clear trajectory history
-        self.t = np.empty((1,0), dtype=np.float64)
-        self.trajectory = np.empty((0, 14), dtype=np.float64)
-
-        # set integration method
-        self.integrator.set_integrator("dopri5", atol=atol, rtol=rtol)
-
-        # set recorder
-        self.integrator.set_solout(self.recorder)
+    def propagate(self, atol=1e-5, rtol=1e-5, adapt=True, npts=1000):
 
         # nondimensionalise state
         r0 = self.r0/self.dynamics.L
@@ -70,16 +60,43 @@ class leg(object):
         t0 = self.t0/self.dynamics.T
         tf = self.tf/self.dynamics.T
 
-        # set initial conditions
-        self.integrator.set_initial_value(fs0, t0)
+        if adapt:
 
-        # numerically integrate
-        self.integrator.integrate(tf)
+            # clear trajectory history
+            self.t = np.empty((1,0), dtype=np.float64)
+            self.trajectory = np.empty((0, 14), dtype=np.float64)
 
-    def mismatch_constraints(self, atol=1e-5, rtol=1e-5):
+            # set integration method
+            self.integrator.set_integrator("dopri5", atol=atol, rtol=rtol)
+
+            # set recorder
+            self.integrator.set_solout(self.recorder)
+
+
+            # set initial conditions
+            self.integrator.set_initial_value(fs0, t0)
+
+            # numerically integrate
+            self.integrator.integrate(tf)
+
+        elif not adapt:
+
+            # time sequence
+            self.t = np.linspace(t0, tf, npts, dtype=np.float64)
+
+            self.trajectory = odeint(
+                lambda fs, t: self.dynamics.eom_fullstate(fs),
+                fs0,
+                self.t,
+                Dfun = lambda fs, t: self.dynamics.eom_fullstate_jac(fs),
+                atol = atol,
+                rtol = rtol
+            )
+
+    def mismatch_constraints(self, atol=1e-5, rtol=1e-5, adapt=True, npts=1000):
 
         # propagate trajectory
-        self.propagate(atol=atol, rtol=rtol)
+        self.propagate(atol=atol, rtol=rtol, adapt=adapt, npts=npts)
 
         # final conditions
         rf = self.trajectory[-1, 0:3]
@@ -90,18 +107,21 @@ class leg(object):
         drf = rf - self.rf/self.dynamics.L
         dvf = vf - self.vf/self.dynamics.V
 
+        # compute Hamiltonian
+        H = self.dynamics.hamiltonian(self.trajectory[-1])
+
         # create equality constraints
-        ceq = np.hstack((drf, dvf, [lmf]))
+        ceq = np.hstack((drf, dvf, [lmf], [H]))
 
         return ceq
 
-    def get_trajectory(self, atol=1e-12, rtol=1e-12):
+    def get_trajectory(self, atol=1e-12, rtol=1e-12, adapt=False, npts=1000):
 
         # traj = [t, x, y, z, vx, vy, vz, m, lx, ly, lz, lvx, lvy, lvz, lm, u, ux, uy, uz]
         # traj.shape = (npts, 19)
 
         # propagate trajectory
-        self.propagate(atol=atol, rtol=rtol)
+        self.propagate(atol=atol, rtol=rtol, adapt=adapt, npts=npts)
 
         # get times
         t = self.t.reshape(self.t.size, 1)
@@ -111,6 +131,10 @@ class leg(object):
         # get controls
         u = np.asarray([self.dynamics.pontryagin(fs) for fs in self.trajectory])
 
+        # get Hamiltonian
+        H = np.asarray([self.dynamics.hamiltonian(fs) for fs in self.trajectory])
+        H = H.reshape(H.size, 1)
+
         # get trajectory
         traj = self.trajectory
         # redimensionalise trajectory
@@ -119,6 +143,6 @@ class leg(object):
         traj[:, 6] *= self.dynamics.M
 
         # assemble full trajectory history
-        traj = np.hstack((t, traj, u))
+        traj = np.hstack((t, traj, u, H))
 
         return traj
