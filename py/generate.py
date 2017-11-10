@@ -3,19 +3,18 @@ import pygmo as pg
 import pygmo_plugins_nonfree as pg7
 import numpy as np
 import matplotlib.pyplot as plt
-import multiprocessing as mp
+import multiprocess as mp
 import os
+import cloudpickle as cp
 
 # constants
 pi = 3.14159265359
 
 # algorithm
 uda = pg7.snopt7(True, "/usr/lib/libsnopt7_c.so")
-uda.set_integer_option("Major iterations limit", 100)
 #uda.set_integer_option("Iterations limit", 40000)
-uda.set_numeric_option("Major optimality tolerance", 1e-2)
-uda.set_numeric_option("Major feasibility tolerance", 1e-8)
-algo = pg.algorithm(uda)
+uda.set_numeric_option("Major optimality tolerance", 1e-5)
+uda.set_numeric_option("Major feasibility tolerance", 1e-10)
 
 class generator(object):
 
@@ -32,7 +31,8 @@ class generator(object):
         Mlb    = -4*pi,
         Mub    = 4*pi,
         Tlb    = 100,
-        Tub    = 400
+        Tub    = 400,
+        load   = True
     ):
 
         # planets
@@ -46,7 +46,7 @@ class generator(object):
         # indirect quadratic orbit to orbit
         udp = pk.trajopt.indirect_or2or(
             el0, elf, mass, thrust, isp,
-            atol, rtol, Tlb, Tub, Mlb, Mub, Mlb, Mub,
+            atol, rtol, (Tlb, Tub),
             freetime=True, alpha=0, bound=False, mu=mu
         )
 
@@ -57,20 +57,25 @@ class generator(object):
         prob.c_tol = [1e-6]*udp.get_nec()
 
         # solution filename
-        fn = os.path.realpath(__file__)
-        fn = os.path.split(fn)[0]
-        fn += "/indirect_or2or_" + o0 + "2" + of + ".npy"
+        fp = os.path.realpath(__file__)
+        self.fp = os.path.split(fp)[0]
+        fn = self.fp + "/../npy/indirect_or2or_" + o0 + "2" + of + ".npy"
+
+        uda.set_integer_option("Major iterations limit", 100)
+        algo = pg.algorithm(uda)
 
         # check for seed
         try:
-
-            # attempt to load decision vector
-            znom = np.load(fn)
-            print("Found nominal trajectory.")
-            pop = pg.population(prob, 0)
-            pop.push_back(znom)
-            # polish solution incase of different atol and rtol
-            pop = algo.evolve(pop)
+            if load:
+                # attempt to load decision vector
+                znom = np.load(fn)
+                print("Found nominal trajectory.")
+                pop = pg.population(prob, 0)
+                pop.push_back(znom)
+                # polish solution incase of different atol and rtol
+                pop = algo.evolve(pop)
+            else:
+                raise EnvironmentError
 
         # if seed not found
         except:
@@ -104,7 +109,10 @@ class generator(object):
         # return sampled states
         return self.trajnom[i]
 
-    def random_walk_quadratic(self, state, npts=20, stepnom=0.1):
+    def random_walk(self, state, npts=20, stepnom=0.1, alpha=0):
+
+        # step record
+        steps = []
 
         # trajectory record
         probs = list()
@@ -125,26 +133,34 @@ class generator(object):
         x0nom = state[1:8]
         step = np.copy(stepnom)
 
+        uda.set_integer_option("Major iterations limit", 30)
+        algo = pg.algorithm(uda)
+
         for i in range(npts):
 
             # starting point specs
             z0   = np.copy(znom)
             x00  = np.copy(x0nom)
+            # norms by which to perturb
+            R = np.linalg.norm(x00[0:3])
+            V = np.linalg.norm(x00[3:6])
 
             # optimise until feasible
             while True:
 
                 # perturb state
-                x01 = x00*(1 + step*np.random.uniform(-1, 1, 7))
+                x01 = np.copy(x00)
+                x01[0:3] += R*step*np.random.uniform(-1, 1, 3)
+                x01[3:6] += V*step*np.random.uniform(-1, 1, 3)
+                x01[6]   += x00[6]*step*np.random.uniform(-1, 1)
 
                 # initialise point to orbit problem
                 udp = pk.trajopt.indirect_pt2or(
                     x01, self.udpnom.elemf, self.udpnom.sc.mass,
                     self.udpnom.sc.thrust, self.udpnom.sc.isp,
                     self.udpnom.atol, self.udpnom.rtol,
-                    self.udpnom.Tlb, self.udpnom.Tub,
-                    self.udpnom.Mflb, self.udpnom.Mfub,
-                    freetime=True, alpha=0, bound=False,
+                    self.udpnom.tof,
+                    freetime=True, alpha=alpha, bound=True,
                     mu=self.udpnom.leg.mu
                 )
 
@@ -152,7 +168,7 @@ class generator(object):
                 prob = pg.problem(udp)
 
                 # constraint tolerance
-                prob.c_tol = [1e-6]*udp.get_nec()
+                prob.c_tol = [1e-8]*udp.get_nec()
 
                 # population
                 pop = pg.population(prob, 0)
@@ -165,31 +181,169 @@ class generator(object):
 
                 # check feasibility
                 if prob.feasibility_x(pop.champion_x):
+                    print("Success on trajectory " + str(i) + " with step size " + str(step))
                     # set problem
                     udp.fitness(pop.champion_x)
+                    # record decision chromosome
+                    udp.z = pop.champion_x
                     # record trajectory
                     probs.append(udp)
                     # seed new decision
                     z0  = np.copy(pop.champion_x)
                     # seed new state
                     x00 = np.copy(x01)
+                    # record the succesfull step size
+                    steps.append(float(step))
                     # increase the perturbation size
-                    step += (stepnom - step)/2
+                    #step = (np.average(steps, weights=np.linspace(0.1, 1, len(steps))) + step + stepnom)/3
+                    step = (step + stepnom)/2
 
-                    print("Success on trajectory " + str(i))
                     print("Perturbation size now " + str(step) + "\n")
                     # move to next state
                     break
                 else:
+                    print("Failure on trajectory " + str(i) + " with step size " + str(step))
                     # decrease perturbation size
-                    step /= 2
-
-                    print("Failure on trajectory " + str(i))
+                    if steps:
+                        #step = (np.average(steps, weights=np.linspace(0.1, 1, len(steps))) + step + 0)/3
+                        step /= 2
+                    else:
+                        step /= 2
                     print("Perturbation size now " + str(step) + "\n")
                     # try again
                     continue
 
+        # save set probs
+        fn = self.fp + "/../p/random_walk.p"
+        cp.dump(probs, open(fn, "wb"))
+
         return probs
+
+    def homotopy(self, prob, stepnom=1):
+
+        # extract nominal problem parametres
+        alpha = 1
+        x0    = prob.leg.x0
+        z     = prob.z
+
+        # algorithm parametres
+        uda.set_integer_option("Major iterations limit", 20)
+        algo = pg.algorithm(uda)
+
+        # current highest feasible alpha
+        alphastar = 0
+        alphalim  = 0.99
+
+        # keep solving this shit until it works
+        while True:
+
+            # initialise point to orbit problem
+            udp = pk.trajopt.indirect_pt2or(
+                x0, self.udpnom.elemf, self.udpnom.sc.mass,
+                self.udpnom.sc.thrust, self.udpnom.sc.isp,
+                self.udpnom.atol, self.udpnom.rtol,
+                self.udpnom.tof,
+                freetime=True, alpha=alpha, bound=True,
+                mu=self.udpnom.leg.mu
+            )
+
+            # pygmo problem
+            prob = pg.problem(udp)
+
+            # constraint tolerance
+            prob.c_tol = [1e-6]*udp.get_nec()
+
+            # population
+            pop = pg.population(prob, 0)
+            pop.push_back(z)
+
+            # solve
+            print("Optimising with alpha = " + str(alpha) + "...")
+            pop = algo.evolve(pop)
+
+            # if it worked
+            if prob.feasibility_x(pop.champion_x):
+
+                print("Feasible, increasing alpha...\n")
+
+                # if finished
+                if alpha == 1:
+                    # set problem
+                    udp.fitness(pop.champion_x)
+                    # store decision chromosome
+                    udp.z = pop.champion_x
+                    # store the problem
+                    best_prob = udp
+                    print("Achieved mass-optimal control! Sugoi desu ne!\n")
+                    break
+
+                # set new decision
+                z = pop.champion_x
+
+                # new best alpha
+                alphastar = alpha
+
+                # new alpha
+                if alpha < alphalim:
+                    alpha = (1 + alpha)/2
+                elif alpha >= alphalim:
+                    alpha = 1
+
+                continue
+
+            # if it failed
+            else:
+                print("Infeasible, decreasing alpha...")
+
+                alpha = (alpha + alphastar)/2
+
+                print()
+                continue
+
+        return best_prob
+
+    def gen_database(
+        self,
+        nnoms    = 10,
+        nwalks   = [10]*10,
+        nsteps   = [20]*10,
+        stepnoms = [1.5]*10,
+        alpha    = 1
+    ):
+
+        # nominal states
+        noms = self.get_nominal_states(nnoms)
+
+        # stage nominal state arg for each walk
+        walkargs = list()
+
+        # for each nominal state
+        for ni in range(nnoms):
+
+            # for each walk from that nominal state
+            for wi in range(nwalks[ni]):
+                walkargs.append((noms[ni], nsteps[ni], stepnoms[ni]))
+
+        # start workers
+        p = mp.Pool(len(walkargs))
+
+        # perform walks in parallel
+        probs = p.map(lambda arg: self.random_walk(arg[0], arg[1], arg[2], alpha=alpha), walkargs)
+
+        # 1d array of quadratically optimal problems with self.z
+        probs = sum(probs, [])
+
+        # save probs
+        fn = self.fp + "/../p/random_walks_alpha" + str(alpha) + ".p"
+        cp.dump(probs, open(fn, "wb"))
+
+        return probs
+
+
+
+
+
+
 
     def plot_trajs(self, probs):
 
@@ -201,24 +355,6 @@ class generator(object):
 
         plt.show()
 
-
-
-
-
-
-
-
-
-
-
-
 if __name__ == "__main__":
-
-    # create generator object
-    gen = generator(atol=1e-12, rtol=1e-12)
-
-    # nominal state
-    s0 = gen.get_nominal_states(10)[0]
-
-    # random walk
-    gen.random_walk_quadratic(s0)
+    gen = generator()
+    gen.gen_database()
