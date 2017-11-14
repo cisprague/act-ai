@@ -28,8 +28,6 @@ class generator(object):
         isp    = 2500,
         atol   = 1e-12,
         rtol   = 1e-12,
-        Mlb    = -4*pi,
-        Mub    = 4*pi,
         Tlb    = 100,
         Tub    = 400,
         load   = True
@@ -219,7 +217,7 @@ class generator(object):
 
         return probs
 
-    def homotopy(self, prob, stepnom=1):
+    def homotopy(self, prob):
 
         # extract nominal problem parametres
         alpha = 1
@@ -233,9 +231,10 @@ class generator(object):
         # current highest feasible alpha
         alphastar = 0
         alphalim  = 0.99
+        nfailed = 0
 
         # keep solving this shit until it works
-        while True:
+        while True and nfailed<4:
 
             # initialise point to orbit problem
             udp = pk.trajopt.indirect_pt2or(
@@ -266,14 +265,15 @@ class generator(object):
 
                 print("Feasible, increasing alpha...\n")
 
+                # set problem
+                udp.fitness(pop.champion_x)
+                # store decision chromosome
+                udp.z = pop.champion_x
+                # store the problem
+                best_prob = udp
+
                 # if finished
                 if alpha == 1:
-                    # set problem
-                    udp.fitness(pop.champion_x)
-                    # store decision chromosome
-                    udp.z = pop.champion_x
-                    # store the problem
-                    best_prob = udp
                     print("Achieved mass-optimal control! Sugoi desu ne!\n")
                     break
 
@@ -295,20 +295,26 @@ class generator(object):
             else:
                 print("Infeasible, decreasing alpha...")
 
+                nfailed += 1
+                print(str(nfailed) + " failed tries on this trajectory.")
+
                 alpha = (alpha + alphastar)/2
 
                 print()
                 continue
 
-        return best_prob
+        try:
+            return best_prob
 
-    def gen_database(
+        except:
+            pass
+
+    def gen_quadratic_database(
         self,
         nnoms    = 10,
-        nwalks   = [10]*10,
-        nsteps   = [20]*10,
-        stepnoms = [1.5]*10,
-        alpha    = 1
+        nwalks   = [5]*10,
+        nsteps   = [40]*10,
+        stepnoms = [0.2]*10
     ):
 
         # nominal states
@@ -325,25 +331,52 @@ class generator(object):
                 walkargs.append((noms[ni], nsteps[ni], stepnoms[ni]))
 
         # start workers
-        p = mp.Pool(len(walkargs))
+        p = mp.Pool(4)
 
         # perform walks in parallel
-        probs = p.map(lambda arg: self.random_walk(arg[0], arg[1], arg[2], alpha=alpha), walkargs)
+        probs = p.map(lambda arg: self.random_walk(arg[0], arg[1], arg[2], alpha=0), walkargs)
 
         # 1d array of quadratically optimal problems with self.z
         probs = sum(probs, [])
 
         # save probs
-        fn = self.fp + "/../p/random_walks_alpha" + str(alpha) + ".p"
+        fn = self.fp + "/../p/random__qc_walks.p"
         cp.dump(probs, open(fn, "wb"))
 
         return probs
 
+    def gen_mop_database(self, probs):
 
+        # set up parallel workers
+        p = mp.Pool(4)
 
+        # convert all quadratic trajectories to mass-optimal ones in parallel
+        probs = p.map(self.homotopy, probs)
 
+        # save the probs
+        fn = self.fp + "/../p/random_moc_walks.p"
+        cp.dump(probs, open(fn, "wb"))
 
+        return probs
 
+    def gen_database(
+        self,
+        nnoms    = 10,
+        nwalks   = [5]*10,
+        nsteps   = [40]*10,
+        stepnoms = [0.2]*10,
+        search   = False
+    ):
+
+        if search:
+            trajs = cp.load(open(self.fp + "/../p/random__qc_walks.p"))
+        # generate quadratic trajectories in parallel
+        trajs = self.gen_quadratic_database(nnoms, nwalks, nsteps, stepnoms)
+
+        # optimise all those trajectories for mass
+        trajs = self.gen_mop_database(trajs)
+
+        return trajs
 
     def plot_trajs(self, probs):
 
@@ -356,5 +389,15 @@ class generator(object):
         plt.show()
 
 if __name__ == "__main__":
-    gen = generator()
-    gen.gen_database()
+
+    # generator
+    gen = generator(load = True)
+
+    # generate database of mass-optimal trajectories in parallel
+    nnodes = 10
+    data = gen.gen_database(
+        nnodes,
+        [10]*nnodes,
+        [40]*nnodes,
+        [0.2]*nnodes
+    )
