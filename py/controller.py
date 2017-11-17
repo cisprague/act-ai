@@ -5,104 +5,95 @@ import cloudpickle as cp
 import torch
 from sklearn.preprocessing import StandardScaler
 import seaborn as sb
+from mlp import mlp
+from types import MethodType
+import multiprocess as mp
 
-class controller(torch.nn.Module):
+class controller(object):
 
-    def __init__(self, data, shape=[10, 15, 20, 10], perc=0.3):
+    def __init__(self, net):
 
-        # shuffle data
-        #np.random.shuffle(data)
+        # unified neural network
+        if isinstance(net, mlp) and net.ni == 7 and net.no == 3:
 
-        # number of samples
-        self.ndat = data.shape[0]
+            # assign network
+            self.net = net
 
-        # percent of data to use as for testin
-        self.ptst = perc
+            # transformations
+            t1 = torch.autograd.Variable(torch.Tensor([1, 2*np.pi, np.pi]), requires_grad=False).double()
+            t2 = torch.autograd.Variable(torch.Tensor([0, -np.pi, 0]), requires_grad=False).double()
 
-        # number of training samples
-        self.ntst = int(self.ptst*self.ndat)
+            # transform output
+            self.net.forward = MethodType(
+                lambda net, x: net._operate(x).mul(t1).add(t2),
+                self.net
+            )
 
-        # full inputs and outputs
-        self.idat = np.copy(data[:, 0:7])
-        self.odat = np.copy(data[:, 7:11])
+            # forward pass of network
+            self.forward = MethodType(
+                lambda self, x: self.net(x),
+                self
+            )
 
-        # input & output training data
-        self.itrn = np.copy(self.idat[:self.ntst, 0:7])
-        self.otrn = np.copy(self.odat[:self.ntst, 7:11])
+        # dedicated neural networks
+        elif hasattr(net, '__iter__') and len(net) == 3 and all([n.ni == 7 and n.no == 1 for n in net]):
 
-        # input & output test data
-        self.itst = self.idat[self.ntst:, 0:7]
-        self.otst = self.odat[self.ntst:, 7:11]
+            # assign networks
+            self.nets = net
 
-        # remove mean and scale to unit variance
-        self.scaler = StandardScaler()
-        self.scaler.fit(self.idat)
+            # throttle network
+            self.nets[0].forward = MethodType(
+                lambda net, x: self.nets[0]._operate(x),
+                self.nets[0]
+            )
 
-        # preprocessed inputs
-        self.itrnt = torch.autograd.Variable(torch.Tensor(self.scaler.transform(self.itrn)))
-        self.itstt = torch.autograd.Variable(torch.Tensor(self.scaler.transform(self.itst)))
+            # azimuth network
+            self.nets[1].forward = MethodType(
+                lambda net, x: self.nets[1]._operate(x).mul(2*np.pi).add(-np.pi),
+                self.nets[1]
+            )
 
-        # neural network architecture
-        self.shape = [7] + list(shape) + [3]
-        self.nl    = len(self.shape)
+            # polar network
+            self.nets[2].forward = MethodType(
+                lambda net, x: self.nets[2]._operate(x).mul(np.pi),
+                self.nets[2]
+            )
 
-        # operations
-        self.ops = list()
+            # forwards pass of networks
+            self.forward = MethodType(
+                lambda self, x: torch.cat([net(x) for net in self.nets], dim=1),
+                self
+            )
 
-        # for each layer, except output
-        for i in range(self.nl - 1):
+        # error
+        else:
+            raise TypeError("Det finns ett problem.")
 
-            # affine function
-            op = [torch.nn.Linear(self.shape[i], self.shape[i + 1])]
 
-            # if penultimate layer
-            if i == self.nl - 2:
-                op.append(torch.nn.Sigmoid())
+    def __call__(self, x):
 
-            # if any other layer
-            else:
-                op.append(torch.nn.ReLU())
-                op.append(torch.nn.Dropout(p=0.5))
+        if isinstance(x, np.ndarray):
+            x = torch.autograd.Variable(torch.from_numpy(x)).double()
+        elif isinstance(x, torch.DoubleTensor):
+            x = torch.autograd.Variable(x).double()
+        elif isinstance(x, torch.autograd.Variable):
+            x = x.double()
+        else:
+            raise TypeError("Det finns et problem.")
 
-            # store operation
-            self.ops.append(op)
+        return self.forward(x)
 
-        # initialise network
-        torch.nn.Module.__init__(self)
+    def train(self, idat, odat, epo=50, lr=1e-4, ptst=0.1, batches=10):
 
-    def forward(self, x):
+        # unified network
+        if hasattr(self, "net"):
+            self.net =  self.net.train(idat, odat, epo=epo, lr=lr, ptst=ptst, batches=batches)
 
-        # network operations
-        for ops in self.ops:
-            for op in ops:
-                x = op(x)
+        # dedicated networks
+        elif hasattr(self, "nets"):
 
-        # u, theta, z
-        x = torch.stack([
-            x[:, 0],
-            x[:, 1]*2*np.pi,
-            x[:, 2]*2 - 1
-        ], 1)
+            # dedicated workers
+            p = mp.Pool(3)
 
-        # u, ux, uy, uz
-        x = torch.stack([
-            x[:, 0],
-            torch.sqrt(1 - x[:, 2]**2)*torch.sin(x[:, 1]),
-            torch.sqrt(1 - x[:, 2]**2)*torch.cos(x[:, 1]),
-            x[:, 2]
-        ], 1)
-
-        return x
-
-if __name__ == "__main__":
-
-	# solution filename
-	fp = os.path.realpath(__file__)
-	fp = os.path.split(fp)[0]
-	fn = fp + "/../npy/xu_data.npy"
-	
-	# data
-	data = np.load(fn)
-	
-	# initialise controller
-	controller = controller(data)
+            # train in parallel
+            self.nets = p.map(lambda i: self.nets[i].train(idat, odat[:, i], epo=epo, lr=lr, ptst=ptst, batches=batches), range(3))
