@@ -2,7 +2,7 @@ import numpy as np
 from sklearn.preprocessing import StandardScaler
 import torch
 
-class database(object):
+class data(object):
 
     def __init__(self, data, cin, cout):
 
@@ -13,8 +13,8 @@ class database(object):
         np.random.shuffle(data)
 
         # number of samples
-        self.ndat = data.shape[0]
+        self.n = data.shape[0]
 
         # cast to torch
-        self.idat = torch.from_numpy(data[:, cin])
-        self.odat = torch.from_numpy(data[:, cout])
+        self.i = torch.from_numpy(data[:, cin])
+        self.o = torch.from_numpy(data[:, cout])
